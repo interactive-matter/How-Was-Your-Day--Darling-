@@ -1,0 +1,94 @@
+ISR(TIMER0_OVF_vect)
+{
+	//store the previous value somewhere
+	static uint8_t previous;
+	static uint8_t pwmPos;
+	static uint8_t subStep;
+	static uint8_t level;
+	static uint8_t steps;
+	static uint8_t nextStep;
+
+	//halt the timer to reconfigure	
+	GTCCR = (1 << TSM) | (1<< PSR0);
+	PORTB = 0;
+
+	if (isFirstPwmRun()) {
+		pwmPos = playbackPos;
+		//we play back to one position before we begun
+		if (playbackPos) {
+			playbackPos--;
+		} else {
+			playbackPos=SAMPLES-1;
+		}
+		subStep=1; // we have no previous so do a constant pwm
+		level=getReadout(pwmPos);
+		previous = level;
+		steps=0;
+		nextStep=0;
+		setPwmNotCounting();
+		clearFirstPwmRun();
+	} else if (pwmPos!=playbackPos) {
+
+		if (subStep==0) {
+			//do major step
+			//go to the next position
+			pwmPos++;
+			if (pwmPos == SAMPLES) {
+				pwmPos=0;
+			}
+			//TODO: move this somewhere to calculate the next value before we start to pulse
+			//get the values from and to we are fading
+			uint8_t lightValue = getReadout(pwmPos);
+
+			//be sure that we at least start at the last level
+			level = previous;
+			if (lightValue>previous) {
+				setPwmCountingUp();
+				steps = 255 / (lightValue-previous);
+			} else if (previous>lightValue) {
+				setPwmCountingDown();
+				steps = 255 / (previous-lightValue);
+			} else {
+				setPwmNotCounting();
+				steps=0;
+			}
+			nextStep = steps;
+			previous = lightValue;
+		} else {
+			//do nextSubStep
+			if (subStep==nextStep) {
+				if (isPwmCountingUp()) {
+					level++;
+				} else if (isPwmCountingDown()) {
+					level--;
+				}
+				nextStep += steps;
+			}
+		}
+		subStep++;
+		//set the value to the timer
+		OCR0A = level;
+	} else {
+		pwmPos = 0;
+		//stop replaying
+		clearPlayingBack();
+		stopPwm();
+		//light pwmLed to signalize we are finished
+		PORTB=0;
+	}
+
+	//and reset & run!	
+	GTCCR = (1<< PSR0);
+	sleep();
+}
+
+void WDT_off(void)
+{
+  _WDR();
+  /* Clear WDRF in MCUSR */
+  MCUSR = 0x00
+  /* Write logical one to WDCE and WDE */
+  WDTCSR |= (1<<WDCE) | (1<<WDE);
+  /* Turn off WDT */
+  WDTCSR = 0x00;
+}
